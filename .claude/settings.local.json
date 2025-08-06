@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:correctonline.summit-edu.com.tw)",
+      "Bash(python:*)",
+      "Bash(pip install:*)"
+    ],
+    "deny": []
+  }
+}

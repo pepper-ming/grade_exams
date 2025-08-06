@@ -1,0 +1,17 @@
+{
+    "login": {
+        "url": "https://correctonline.summit-edu.com.tw/?c=signOut"
+    },
+    "settings": {
+        "timeout": 30,
+        "wait_time": 2,
+        "max_retry": 3
+    },
+    "api": {
+        "preferred_provider": "anthropic"
+    },
+    "captcha": {
+        "save_path": "./captcha_images/",
+        "max_attempts": 3
+    }
+}
