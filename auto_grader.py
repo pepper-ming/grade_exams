@@ -24,23 +24,26 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class CaptchaResolver:
-    """驗證碼解析器"""
+    """驗證碼解析器 - 支援Claude CLI和API兩種方式"""
     
     def __init__(self, config):
         self.config = config
         self.anthropic_client = None
         self.openai_client = None
+        self.use_claude_cli = config.get('captcha', {}).get('use_claude_cli', True)  # 默認使用CLI
         
         # 從環境變數讀取API密鑰
         anthropic_key = os.getenv('ANTHROPIC_API_KEY')
         openai_key = os.getenv('OPENAI_API_KEY')
         
-        # 初始化API客戶端
+        # 初始化API客戶端（作為備用）
         if anthropic_key:
             self.anthropic_client = Anthropic(api_key=anthropic_key)
             
         if openai_key:
             self.openai_client = OpenAI(api_key=openai_key)
+        
+        print(f"[INFO] 驗證碼識別方式: {'Claude CLI' if self.use_claude_cli else 'API'}")
     
     def save_captcha_image(self, image_data, filename):
         """儲存驗證碼圖片"""
@@ -102,7 +105,7 @@ class CaptchaResolver:
             return None
     
     def recognize_captcha_with_openai(self, image_path):
-        """使用OpenAI API識別驗證碼"""
+        """使用OpenAI API識別驗證碼（使用最划算的gpt-4o-mini模型）"""
         if not self.openai_client:
             return None
         
@@ -110,7 +113,7 @@ class CaptchaResolver:
             image_base64 = self.image_to_base64(image_path)
             
             response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",  # 使用最划算的模型
                 messages=[
                     {
                         "role": "user",
@@ -128,33 +131,101 @@ class CaptchaResolver:
                         ]
                     }
                 ],
-                max_tokens=100
+                max_tokens=50  # 減少輸出token
             )
             
             captcha_text = response.choices[0].message.content.strip()
-            print(f"GPT-4識別驗證碼: {captcha_text}")
+            print(f"GPT-4o-mini識別驗證碼: {captcha_text}")
             return captcha_text
             
         except Exception as e:
             print(f"OpenAI API識別失敗: {e}")
             return None
     
+    def recognize_captcha_with_cli(self, image_path):
+        """使用Claude CLI識別驗證碼"""
+        try:
+            # 構建識別prompt
+            image_path = os.path.abspath(image_path)
+            prompt = f'請使用Read工具讀取驗證碼圖片文件: "{image_path}" 然後識別其中的驗證碼內容。只回答驗證碼的數字或字母，不要其他說明。'
+            
+            # 調用Claude CLI
+            import subprocess
+            process = subprocess.Popen([
+                'cmd', '/c', 'claude', 
+                '--print', 
+                '--output-format', 'text', 
+                prompt
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding='cp950',
+            errors='replace',
+            cwd=os.path.dirname(image_path)
+            )
+            
+            stdout, stderr = process.communicate(timeout=45)
+            
+            if process.returncode == 0 and stdout.strip():
+                # 解析回應
+                import re
+                response = stdout.strip()
+                print(f"Claude CLI識別回應: {response}")
+                
+                # 驗證碼格式匹配
+                patterns = [
+                    r'\b[A-Z0-9]{4,6}\b',    # 4-6位大寫字母或數字
+                    r'\b[0-9]{4,6}\b',       # 4-6位純數字  
+                    r'\b[A-Za-z0-9]{3,8}\b'  # 3-8位混合
+                ]
+                
+                excluded_words = {'read', 'tool', 'file', 'image', 'captcha', 'code', 'text'}
+                
+                for pattern in patterns:
+                    matches = re.findall(pattern, response, re.IGNORECASE)
+                    for match in matches:
+                        if match.lower() not in excluded_words:
+                            print(f"Claude CLI識別驗證碼: {match}")
+                            return match
+                
+                return None
+            else:
+                print(f"Claude CLI執行失敗: {stderr}")
+                return None
+                
+        except Exception as e:
+            print(f"Claude CLI識別失敗: {e}")
+            return None
+
     def recognize_captcha(self, image_path):
-        """識別驗證碼（使用優選的API）"""
-        preferred = self.config['api'].get('preferred_provider', 'anthropic')
+        """識別驗證碼（按成本效益順序：Claude CLI > OpenAI > Anthropic）"""
         
-        if preferred == 'anthropic':
-            result = self.recognize_captcha_with_anthropic(image_path)
-            if result is None and self.openai_client:
-                print("Claude識別失敗，嘗試使用OpenAI...")
-                result = self.recognize_captcha_with_openai(image_path)
-        else:
+        # 第一優先：Claude CLI（免費）
+        if self.use_claude_cli:
+            print("[INFO] 使用Claude CLI識別驗證碼（免費）...")
+            result = self.recognize_captcha_with_cli(image_path)
+            if result:
+                return result
+            print("[WARN] Claude CLI識別失敗，嘗試使用OpenAI API...")
+        
+        # 第二優先：OpenAI gpt-4o-mini（最划算的API）
+        if self.openai_client:
+            print("[INFO] 使用OpenAI gpt-4o-mini識別驗證碼（最划算）...")
             result = self.recognize_captcha_with_openai(image_path)
-            if result is None and self.anthropic_client:
-                print("OpenAI識別失敗，嘗試使用Claude...")
-                result = self.recognize_captcha_with_anthropic(image_path)
+            if result:
+                return result
+            print("[WARN] OpenAI識別失敗，嘗試使用Anthropic API...")
         
-        return result
+        # 第三優先：Anthropic Claude（較貴的備援）
+        if self.anthropic_client:
+            print("[INFO] 使用Anthropic Claude識別驗證碼（備援）...")
+            result = self.recognize_captcha_with_anthropic(image_path)
+            if result:
+                return result
+            print("[ERROR] 所有識別方法都失敗了")
+        
+        return None
 
 class AutoGrader:
     def __init__(self, config_file="config.json"):

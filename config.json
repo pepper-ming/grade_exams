@@ -8,10 +8,13 @@
         "max_retry": 3
     },
     "api": {
-        "preferred_provider": "anthropic"
+        "preferred_provider": "openai",
+        "openai_model": "gpt-4o-mini",
+        "anthropic_model": "claude-3-5-sonnet-20241022"
     },
     "captcha": {
         "save_path": "./captcha_images/",
-        "max_attempts": 3
+        "max_attempts": 3,
+        "use_claude_cli": true
     }
 }
