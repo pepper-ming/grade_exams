@@ -551,11 +551,242 @@ class AutoGrader:
         if self.driver:
             self.driver.quit()
             print("瀏覽器已關閉")
+    
+    def navigate_to_question(self, question_number=19, school_index=0):
+        """導航到指定題目
+        
+        Args:
+            question_number (int): 題目編號 (19 或 20)
+            school_index (int): 學校索引 (0, 1, 2)
+        """
+        try:
+            print(f"[INFO] 正在導航到第 {question_number} 題（學校索引：{school_index}）")
+            
+            # 等待頁面載入
+            time.sleep(self.config['settings']['wait_time'])
+            
+            # 查找第19題的按鈕
+            question_selectors = [
+                # 包含第19題文字的按鈕
+                (By.XPATH, f"//div[contains(text(), '第{question_number}題')]"),
+                (By.XPATH, f"//*[contains(text(), '第{question_number}題')]"),
+                # 更具體的選擇器
+                (By.XPATH, f"//div[@class='card-body']//div[contains(text(), '第{question_number}題')]"),
+            ]
+            
+            question_button = None
+            
+            # 首先獲取所有匹配的元素
+            all_question_buttons = []
+            for selector_type, selector_value in question_selectors:
+                try:
+                    elements = self.driver.find_elements(selector_type, selector_value)
+                    all_question_buttons.extend(elements)
+                except:
+                    continue
+            
+            print(f"[DEBUG] 找到 {len(all_question_buttons)} 個第{question_number}題按鈕")
+            
+            # 選擇指定學校的按鈕（根據索引）
+            if all_question_buttons and school_index < len(all_question_buttons):
+                question_button = all_question_buttons[school_index]
+                print(f"[INFO] 選擇第 {school_index + 1} 個第{question_number}題按鈕")
+            elif all_question_buttons:
+                # 如果索引超出範圍，使用第一個
+                question_button = all_question_buttons[0]
+                print(f"[WARN] 學校索引超出範圍，使用第一個第{question_number}題按鈕")
+            
+            if question_button:
+                # 滾動到元素可見
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", question_button)
+                time.sleep(1)
+                
+                # 點擊題目
+                question_button.click()
+                print(f"[SUCCESS] 已點擊第{question_number}題")
+                
+                # 等待頁面跳轉
+                time.sleep(self.config['settings']['wait_time'])
+                
+                return True
+            else:
+                print(f"[ERROR] 找不到第{question_number}題的按鈕")
+                return False
+                
+        except Exception as e:
+            print(f"[ERROR] 導航到題目時發生錯誤: {e}")
+            return False
+    
+    def get_first_student_exam(self):
+        """獲取第一位學生的考卷"""
+        try:
+            print("[INFO] 正在獲取第一位學生的考卷...")
+            
+            # 等待頁面載入
+            time.sleep(self.config['settings']['wait_time'] + 2)  # 多等待一點時間
+            
+            # 先嘗試截圖看看當前頁面狀態
+            try:
+                timestamp = int(time.time())
+                debug_screenshot = os.path.join(self.config['captcha']['save_path'], f"debug_page_{timestamp}.png")
+                os.makedirs(os.path.dirname(debug_screenshot), exist_ok=True)
+                self.driver.save_screenshot(debug_screenshot)
+                print(f"[DEBUG] 已保存頁面截圖用於調試: {debug_screenshot}")
+            except:
+                pass
+            
+            # 更全面的學生選擇器
+            student_selectors = [
+                # 表格相關
+                (By.XPATH, "//table//tr[position()>1]//td//a"),  # 表格中的連結
+                (By.XPATH, "//tbody//tr[1]//a"),  # tbody第一行的連結
+                (By.XPATH, "//tr[contains(@class, 'student') or contains(@onclick, 'student')]//a"),
+                
+                # 按鈕相關
+                (By.XPATH, "//button[contains(text(), '批改')]"),
+                (By.XPATH, "//button[contains(text(), '檢視')]"),
+                (By.XPATH, "//button[contains(text(), '開始')]"),
+                (By.XPATH, "//a[contains(text(), '批改')]"),
+                (By.XPATH, "//a[contains(text(), '檢視')]"),
+                
+                # 連結相關
+                (By.XPATH, "//a[contains(@href, 'student')]"),
+                (By.XPATH, "//a[contains(@href, 'exam')]"),
+                (By.XPATH, "//a[contains(@href, 'grade')]"),
+                
+                # 通用選擇器
+                (By.XPATH, "//div[contains(@class, 'card')]//a"),
+                (By.XPATH, "//div[contains(@class, 'list')]//a"),
+            ]
+            
+            first_student_link = None
+            
+            for selector_type, selector_value in student_selectors:
+                try:
+                    elements = self.driver.find_elements(selector_type, selector_value)
+                    if elements:
+                        # 檢查元素是否可見且可交互
+                        for element in elements:
+                            if element.is_displayed() and element.is_enabled():
+                                first_student_link = element
+                                print(f"[INFO] 找到可交互的學生連結: {selector_value}")
+                                break
+                        if first_student_link:
+                            break
+                except:
+                    continue
+            
+            if first_student_link:
+                try:
+                    # 滾動到元素可見
+                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", first_student_link)
+                    time.sleep(2)
+                    
+                    # 嘗試多種點擊方式
+                    try:
+                        # 方式1: 直接點擊
+                        first_student_link.click()
+                    except:
+                        try:
+                            # 方式2: JavaScript點擊
+                            self.driver.execute_script("arguments[0].click();", first_student_link)
+                        except:
+                            # 方式3: 通過ActionChains點擊
+                            from selenium.webdriver.common.action_chains import ActionChains
+                            actions = ActionChains(self.driver)
+                            actions.move_to_element(first_student_link).click().perform()
+                    
+                    print("[SUCCESS] 已點擊第一位學生")
+                    
+                    # 等待考卷頁面載入
+                    time.sleep(self.config['settings']['wait_time'] + 2)
+                    
+                    return True
+                    
+                except Exception as click_error:
+                    print(f"[ERROR] 點擊學生連結失敗: {click_error}")
+                    return False
+            else:
+                print("[ERROR] 找不到可交互的學生連結")
+                
+                # 如果找不到連結，直接截取當前頁面作為考卷
+                print("[INFO] 嘗試截取當前頁面作為考卷內容")
+                return True
+                
+        except Exception as e:
+            print(f"[ERROR] 獲取學生考卷時發生錯誤: {e}")
+            return False
+    
+    def capture_exam_images(self):
+        """抓取考卷圖片"""
+        try:
+            print("[INFO] 正在抓取考卷圖片...")
+            
+            # 等待頁面載入
+            time.sleep(self.config['settings']['wait_time'])
+            
+            # 查找考卷圖片
+            image_selectors = [
+                (By.XPATH, "//img[contains(@src, 'exam') or contains(@src, 'student')]"),
+                (By.XPATH, "//img[contains(@alt, '考卷') or contains(@alt, 'exam')]"),
+                (By.XPATH, "//div[@class='exam-content']//img"),
+                (By.XPATH, "//div[contains(@class, 'answer')]//img"),
+                (By.TAG_NAME, "img"),  # 所有圖片，作為最後嘗試
+            ]
+            
+            exam_images = []
+            
+            for selector_type, selector_value in image_selectors:
+                try:
+                    images = self.driver.find_elements(selector_type, selector_value)
+                    if images:
+                        print(f"[INFO] 找到 {len(images)} 個圖片元素")
+                        exam_images = images
+                        break
+                except:
+                    continue
+            
+            if not exam_images:
+                print("[WARN] 未找到考卷圖片，嘗試截取整個頁面")
+                # 如果找不到特定圖片，截取整個頁面
+                timestamp = int(time.time())
+                screenshot_path = os.path.join(self.config['captcha']['save_path'], f"exam_page_{timestamp}.png")
+                os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+                self.driver.save_screenshot(screenshot_path)
+                print(f"[INFO] 已保存頁面截圖: {screenshot_path}")
+                return [screenshot_path]
+            
+            # 保存考卷圖片
+            saved_images = []
+            for i, img in enumerate(exam_images):
+                try:
+                    # 檢查圖片是否可見且不是很小的圖片
+                    if img.is_displayed() and img.size['width'] > 50 and img.size['height'] > 50:
+                        timestamp = int(time.time())
+                        image_path = os.path.join(self.config['captcha']['save_path'], f"exam_image_{timestamp}_{i}.png")
+                        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+                        
+                        img.screenshot(image_path)
+                        saved_images.append(image_path)
+                        print(f"[SUCCESS] 已保存考卷圖片: {image_path}")
+                        
+                        # 限制最多保存5張圖片
+                        if len(saved_images) >= 5:
+                            break
+                except Exception as e:
+                    print(f"[WARN] 保存第 {i} 張圖片失敗: {e}")
+                    continue
+            
+            return saved_images
+            
+        except Exception as e:
+            print(f"[ERROR] 抓取考卷圖片時發生錯誤: {e}")
+            return []
 
 def main():
     """主程序"""
     print("=== 自動化改考卷程式 v2.0 ===")
-    print("支援自動驗證碼識別功能")
+    print("支援自動驗證碼識別和考卷批改功能")
     
     grader = AutoGrader()
     
@@ -564,15 +795,52 @@ def main():
         return
     
     try:
+        # 步驟1: 自動登入
         if grader.auto_login():
-            print("系統登入成功，可以開始批改作業")
-            # 在這裡添加批改考卷的功能
+            print("[SUCCESS] 系統登入成功！")
+            
+            # 步驟2: 導航到第19題
+            print("\n=== 開始批改考卷流程 ===")
+            if grader.navigate_to_question(question_number=19, school_index=0):
+                print("[SUCCESS] 已進入第19題頁面")
+                
+                # 步驟3: 獲取第一位學生的考卷
+                if grader.get_first_student_exam():
+                    print("[SUCCESS] 已進入第一位學生的考卷頁面")
+                    
+                    # 步驟4: 抓取考卷圖片
+                    exam_images = grader.capture_exam_images()
+                    if exam_images:
+                        print(f"[SUCCESS] 成功抓取 {len(exam_images)} 張考卷圖片")
+                        for i, image_path in enumerate(exam_images):
+                            print(f"  考卷圖片 {i+1}: {image_path}")
+                        
+                        # 步驟5: 使用圖片識別分析考卷內容（示例）
+                        print("\n=== 分析考卷內容 ===")
+                        for i, image_path in enumerate(exam_images[:2]):  # 只處理前兩張圖片
+                            print(f"[INFO] 正在分析第 {i+1} 張考卷圖片...")
+                            
+                            # 使用現有的驗證碼識別器來識別考卷內容
+                            # 這裡可以根據需要調整prompt
+                            result = grader.captcha_resolver.recognize_captcha(image_path)
+                            if result:
+                                print(f"[INFO] 第 {i+1} 張圖片識別結果: {result}")
+                            else:
+                                print(f"[WARN] 第 {i+1} 張圖片識別失敗")
+                    else:
+                        print("[ERROR] 無法抓取考卷圖片")
+                else:
+                    print("[ERROR] 無法進入學生考卷頁面")
+            else:
+                print("[ERROR] 無法進入第19題頁面")
+            
+            print("\n=== 批改流程完成 ===")
             input("按Enter鍵關閉程序...")
         else:
-            print("自動登入失敗")
+            print("[ERROR] 自動登入失敗")
     
     except KeyboardInterrupt:
-        print("程序被用戶中斷")
+        print("\n程序被用戶中斷")
     
     finally:
         grader.close()
